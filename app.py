@@ -8,6 +8,7 @@ from datetime import datetime
 from fpdf import FPDF
 from html import unescape 
 from xhtml2pdf import pisa
+import qrcode
 
 
 app = Flask(__name__)
@@ -53,6 +54,8 @@ class Student(db.Model):
     attachment_filename = db.Column(db.String(200), nullable=True)
     approved_at = db.Column(db.DateTime, nullable=True)
     hours = db.Column(db.String(200), nullable=True)
+    qr_code_filename = db.Column(db.String(200), nullable=True)  # New column
+
 
     def __repr__(self):
         return f'<Student {self.name}>'
@@ -127,7 +130,37 @@ def generate_pdf_from_html(html_content, file_path):
             return False
     return True
 
+def generate_qr_code(student, output_path):
+    # Data to encode
+    qr_data = (
+        f"Name: {student.name}\n"
+        f"Reg No: {student.reg_no}\n"
+        f"Department: {student.department}\n"
+        f"Leave From: {student.start_date}\n"
+        f"Leave To: {student.end_date}\n"
+        f"Reason: {student.reason}\n"
+        f"Approved At: {student.approved_at.strftime('%Y-%m-%d')}\n"
+        f"Email: {student.email}"
+    )
 
+    # Generate QR code
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(qr_data)
+    qr.make(fit=True)
+    img = qr.make_image(fill='black', back_color='white')
+
+    # Define the filename using the student's register number and the current date
+    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+    qr_filename = f"{student.reg_no}_{date_str}_{student.reason}qr.png"
+
+    qr_directory = "static/qrcodes/"
+    os.makedirs(qr_directory, exist_ok=True)  # Ensure the directory exists
+    qr_filepath = os.path.join(qr_directory, qr_filename)
+
+    img.save(qr_filepath)
+    # Update student object
+    student.qr_code_filename = qr_filepath
+    db.session.commit()
 
 @app.route('/section-grid')
 def section_grid():
@@ -249,8 +282,12 @@ def approve_form_1(form_id):
     form.approved_at = datetime.utcnow()
     db.session.commit()  # Commit changes
 
+     # Generate QR code
+    qr_path = f"static/qr_codes/{form_id}_qr.png"
+    generate_qr_code(form, qr_path)
+
     # Generate the approval HTML content
-    approval_html = render_template('approved_form_1.html', student=form)
+    approval_html = render_template('approved_form_1.html', student=form, qr_path=qr_path)
 
     # Save the PDF to a file
     form_path = f"static/approved_forms/{form_id}_approved.pdf"
